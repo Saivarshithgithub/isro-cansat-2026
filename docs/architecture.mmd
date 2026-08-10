@@ -1,0 +1,64 @@
+%%{init: {'theme':'dark','flowchart':{'curve':'basis'}}}%%
+flowchart TB
+    subgraph HW["🛰️  CanSat (airborne)"]
+        FW["cansat_firmware.ino<br/>BMP280 · MPU-6050 · GPS<br/>5 Hz · 115200 baud"]
+        SIMFW["cansat_simulator.ino<br/>hardware-free flight (Req 11)"]
+    end
+
+    RADIO(["Radio downlink<br/>$CSAT,…*XX  (18 fields)"])
+    FW --> RADIO
+    SIMFW --> RADIO
+    RADIO -->|USB| PC["PC serial port"]
+
+    subgraph BROWSER["🖥️  Browser GCS (Chrome / Edge)"]
+        direction TB
+
+        subgraph INGEST["Input paths"]
+            SERIAL["serial.js<br/>Web Serial API"]
+            WS["websocket.js<br/>ws://localhost:8765"]
+            SIM["controls.js simulator<br/>synthetic $CSAT (Req 11)"]
+        end
+
+        PARSER["parser.js — dispatchTelemetry(raw)<br/>① validate XOR checksum<br/>② split 18 fields<br/>③ derive descent rate + 4-digit error code<br/>④ gate on window.GCS.streaming"]
+
+        EVENT{{"CustomEvent 'telemetry' on document<br/>(SignalBus — single event)"}}
+
+        subgraph CONSUMERS["Consumers (pure subscribers)"]
+            CHARTS["charts.js<br/>Chart.js graphs"]
+            MAP["map.js<br/>Leaflet GPS track"]
+            ORIENT["orientation.js<br/>Three.js attitude cube"]
+            ERR["error-codes.js<br/>fault banner + log"]
+            MISSION["mission.js<br/>state · timer · readouts · link stats"]
+            DATA["data-manager.js<br/>buffer · CSV · localStorage"]
+        end
+
+        VIDEO["video.js<br/>getUserMedia camera (independent)"]
+        CONTROLS["controls.js<br/>Start/Stop gate · uplink cmds · clock"]
+    end
+
+    PC --> SERIAL
+    PC -->|Python bridge.py| WS
+
+    SERIAL --> PARSER
+    WS --> PARSER
+    SIM --> PARSER
+
+    PARSER --> EVENT
+    EVENT --> CHARTS
+    EVENT --> MAP
+    EVENT --> ORIENT
+    EVENT --> ERR
+    EVENT --> MISSION
+    EVENT --> DATA
+
+    CONTROLS -.->|sets streaming| PARSER
+    CONTROLS -.->|SEP/CHUTE/ARM…| SERIAL
+
+    classDef hw fill:#1b3a4b,stroke:#34c3ff,color:#e6f7ff;
+    classDef parse fill:#3a2f1b,stroke:#ffb733,color:#fff6e6;
+    classDef bus fill:#2b1b3a,stroke:#c34dff,color:#f3e6ff;
+    classDef consume fill:#1b3a26,stroke:#34ff8f,color:#e6fff0;
+    class FW,SIMFW hw;
+    class PARSER parse;
+    class EVENT bus;
+    class CHARTS,MAP,ORIENT,ERR,MISSION,DATA consume;

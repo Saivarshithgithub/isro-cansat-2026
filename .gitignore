@@ -1,0 +1,27 @@
+# ── OS cruft ────────────────────────────────────────────────
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
+
+# ── Node (only used transiently for the Mermaid diagram CLI) ─
+node_modules/
+package-lock.json
+npm-debug.log*
+
+# ── Python bridge ───────────────────────────────────────────
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# ── Editor / IDE ────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+
+# ── Local runtime artifacts ─────────────────────────────────
+*.log
+
+# ── Competition source PDF (kept out of the public repo) ────
+cansat_and_cubesat_project.pdf

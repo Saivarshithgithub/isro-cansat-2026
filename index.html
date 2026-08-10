@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CanSat Ground Control — IN-SPACe 2026</title>
+
+  <!-- Leaflet (map) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- Chart.js (graphs) -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <!-- Three.js (orientation) -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+<div class="gcs-grid">
+
+  <!-- ═══════════════ TOP CONTROL BAR (Req 2) ═══════════════ -->
+  <header class="top-bar" id="topBar">
+    <div class="brand">
+      <span class="logo">▲</span>
+      <div>
+        <div class="title">CanSat Ground Control</div>
+        <div class="subtitle">IN-SPACe · India Space Week 2026</div>
+      </div>
+    </div>
+
+    <div class="link-group">
+      <select id="baudSelect" title="Serial baud rate">
+        <option value="115200" selected>115200</option>
+        <option value="57600">57600</option>
+        <option value="9600">9600</option>
+      </select>
+      <button id="connectBtn" class="btn btn-link">🔌 Connect Serial</button>
+      <button id="wsConnectBtn" class="btn btn-link">🌐 WebSocket</button>
+    </div>
+
+    <div class="stream-group">
+      <button id="startBtn" class="btn btn-go">▶ Start</button>
+      <button id="stopBtn" class="btn btn-stop" disabled>■ Stop</button>
+      <button id="exportCsvBtn" class="btn">⭳ Export CSV</button>
+      <button id="exportGraphBtn" class="btn">📈 Export Graph</button>
+      <button id="syncTimeBtn" class="btn">🕐 Sync PC Time</button>
+      <button id="resetPacketBtn" class="btn btn-warn">↺ Reset Packet</button>
+    </div>
+
+    <div class="status-group">
+      <div class="clock" id="pcClock">--:--:--</div>
+      <div class="timer">T+ <span id="missionTimer">00:00:00</span></div>
+      <span id="phaseBadge" class="phase-badge state-0">PAD</span>
+      <span id="connStatus" class="conn-status disconnected">● DISCONNECTED</span>
+    </div>
+  </header>
+
+  <!-- ═══════════════ LEFT COLUMN: MISSION CONTROL + ERROR + TEST ═══════════════ -->
+  <aside class="panel mission-panel" id="missionPanel">
+
+    <!-- Mission Control (Req 3) -->
+    <section class="card">
+      <h2>Mission Control</h2>
+      <div class="cmd-grid">
+        <button id="cmdSepBtn"    class="btn cmd" data-cmd="SEP">Manual Separation</button>
+        <button id="cmdChuteBtn"  class="btn cmd cmd-danger" data-cmd="CHUTE">Emergency Parachute</button>
+        <button id="cmdRedundBtn" class="btn cmd" data-cmd="REDUND">Redundant Activation</button>
+        <div class="cmd-row">
+          <button id="cmdArmBtn"   class="btn cmd small" data-cmd="ARM">ARM</button>
+          <button id="cmdPingBtn"  class="btn cmd small" data-cmd="PING">PING</button>
+          <button id="cmdAbortBtn" class="btn cmd small cmd-danger" data-cmd="ABORT">ABORT</button>
+        </div>
+      </div>
+      <div class="cmd-status" id="cmdStatus">Command status: idle</div>
+    </section>
+
+    <!-- Flight phase machine -->
+    <section class="card">
+      <h2>Flight Phase</h2>
+      <ul class="state-machine">
+        <li id="state-PAD"      class="state-item active">PAD</li>
+        <li id="state-ASCENT"   class="state-item">ASCENT</li>
+        <li id="state-APOGEE"   class="state-item">APOGEE</li>
+        <li id="state-DESCENT"  class="state-item">DESCENT</li>
+        <li id="state-LANDING"  class="state-item">LANDING</li>
+        <li id="state-RECOVERY" class="state-item">RECOVERY</li>
+      </ul>
+    </section>
+
+    <!-- 4-digit Error Code System (Req 5) -->
+    <section class="card">
+      <h2>Error Code <span class="hint">(4-digit)</span></h2>
+      <div class="errcode" id="errorCodeDisplay">0000</div>
+      <div class="errdigits">
+        <div class="errdigit"><span id="errDigit1" class="d ok">0</span><label>Descent<br>Rate</label></div>
+        <div class="errdigit"><span id="errDigit2" class="d ok">0</span><label>GPS</label></div>
+        <div class="errdigit"><span id="errDigit3" class="d ok">0</span><label>Payload<br>Sep.</label></div>
+        <div class="errdigit"><span id="errDigit4" class="d ok">0</span><label>E-Chute</label></div>
+      </div>
+      <div id="errorBanner" class="error-banner hidden"></div>
+      <ul id="errorLog" class="error-log"></ul>
+    </section>
+
+    <!-- Packet stats -->
+    <section class="card">
+      <h2>Link Stats</h2>
+      <div class="stat-row"><span>Packets</span><b id="pktCount">0</b></div>
+      <div class="stat-row"><span>Rate</span><b><span id="pktRate">0.0</span> Hz</b></div>
+      <div class="stat-row"><span>Loss</span><b id="pktLoss">0 dropped</b></div>
+    </section>
+
+    <!-- Testing (Req 11) -->
+    <section class="card">
+      <h2>Testing</h2>
+      <button id="simBtn" class="btn btn-block">▶ Simulate Telemetry</button>
+      <select id="scenarioSelect" class="btn-block">
+        <option value="nominal">Nominal flight</option>
+        <option value="gpsloss">GPS loss</option>
+        <option value="fastdescent">Fast descent fault</option>
+        <option value="sepfail">Separation failure</option>
+      </select>
+      <button id="injectFaultBtn" class="btn btn-block btn-warn">⚠ Inject Fault (1 pkt)</button>
+    </section>
+  </aside>
+
+  <!-- ═══════════════ CENTER: GRAPHS + MAP ═══════════════ -->
+  <main class="panel graphs-panel" id="graphsPanel">
+    <section class="card">
+      <h2>Real-Time Telemetry Graphs</h2>
+      <div class="chart-grid">
+        <div class="chart-box"><canvas id="altCanvas"></canvas></div>
+        <div class="chart-box"><canvas id="pressCanvas"></canvas></div>
+        <div class="chart-box"><canvas id="tempCanvas"></canvas></div>
+        <div class="chart-box"><canvas id="descentCanvas"></canvas></div>
+        <div class="chart-box chart-wide"><canvas id="batCanvas"></canvas></div>
+      </div>
+    </section>
+  </main>
+
+  <section class="panel map-panel" id="mapPanel">
+    <div class="card card-fill">
+      <h2>GPS Tracking Map</h2>
+      <div id="mapContainer"></div>
+    </div>
+  </section>
+
+  <!-- ═══════════════ RIGHT: ORIENTATION + VIDEO ═══════════════ -->
+  <aside class="panel orient-panel" id="orientPanel">
+    <div class="card card-fill">
+      <h2>Orientation</h2>
+      <div id="orientContainer"></div>
+      <div class="rpy">
+        <div><label>Roll</label><b id="rollVal">0.0°</b></div>
+        <div><label>Pitch</label><b id="pitchVal">0.0°</b></div>
+        <div><label>Yaw</label><b id="yawVal">0.0°</b></div>
+      </div>
+    </div>
+  </aside>
+
+  <section class="panel video-panel" id="videoPanel">
+    <div class="card card-fill">
+      <h2>Live Video <span id="videoStatus" class="hint">off</span></h2>
+      <video id="liveVideo" autoplay playsinline muted></video>
+      <div class="video-controls">
+        <select id="cameraSelect" title="Camera source"><option>Default camera</option></select>
+        <button id="videoStartBtn" class="btn small btn-go">▶</button>
+        <button id="videoStopBtn"  class="btn small btn-stop" disabled>■</button>
+        <button id="captureBtn"    class="btn small">📷</button>
+      </div>
+      <canvas id="snapshotCanvas" class="hidden"></canvas>
+    </div>
+  </section>
+
+  <!-- ═══════════════ BOTTOM: TELEMETRY (container + payload) (Req 4) ═══════════════ -->
+  <footer class="telemetry-bar" id="telemetryBar">
+    <div class="telem-group">
+      <span class="telem-group-title">CONTAINER</span>
+      <div class="telem-cell"><label>Alt</label><b id="t_alt" class="v">—</b><small>m</small></div>
+      <div class="telem-cell"><label>Press</label><b id="t_press" class="v">—</b><small>hPa</small></div>
+      <div class="telem-cell"><label>Temp</label><b id="t_temp" class="v">—</b><small>°C</small></div>
+      <div class="telem-cell"><label>GPS</label><b id="t_gpsFix" class="v">—</b></div>
+      <div class="telem-cell"><label>Lat</label><b id="t_lat" class="v">—</b></div>
+      <div class="telem-cell"><label>Lon</label><b id="t_lon" class="v">—</b></div>
+      <div class="telem-cell"><label>GPS Alt</label><b id="t_gpsAlt" class="v">—</b><small>m</small></div>
+      <div class="telem-cell"><label>Batt</label><b id="t_bat" class="v">—</b><small>V</small></div>
+      <div class="telem-cell"><label>State</label><b id="t_state" class="v">—</b></div>
+      <div class="telem-cell"><label>Seq</label><b id="t_seq" class="v">—</b></div>
+    </div>
+    <div class="telem-group">
+      <span class="telem-group-title">PAYLOAD</span>
+      <div class="telem-cell"><label>Ax</label><b id="p_ax" class="v">—</b><small>g</small></div>
+      <div class="telem-cell"><label>Ay</label><b id="p_ay" class="v">—</b><small>g</small></div>
+      <div class="telem-cell"><label>Az</label><b id="p_az" class="v">—</b><small>g</small></div>
+      <div class="telem-cell"><label>Gx</label><b id="p_gx" class="v">—</b><small>°/s</small></div>
+      <div class="telem-cell"><label>Gy</label><b id="p_gy" class="v">—</b><small>°/s</small></div>
+      <div class="telem-cell"><label>Gz</label><b id="p_gz" class="v">—</b><small>°/s</small></div>
+      <div class="telem-cell"><label>Roll</label><b id="p_roll" class="v">—</b></div>
+      <div class="telem-cell"><label>Pitch</label><b id="p_pitch" class="v">—</b></div>
+      <div class="telem-cell"><label>Yaw</label><b id="p_yaw" class="v">—</b></div>
+      <div class="telem-cell"><label>Descent</label><b id="p_descent" class="v">—</b><small>m/s</small></div>
+      <div class="telem-cell"><label>Sep</label><b id="p_sep" class="v">—</b></div>
+      <div class="telem-cell"><label>Chute</label><b id="p_chute" class="v">—</b></div>
+    </div>
+  </footer>
+</div>
+
+<!-- Scripts — load order per CONTRACT.md §8 -->
+<script src="js/parser.js"></script>
+<script src="js/serial.js"></script>
+<script src="js/websocket.js"></script>
+<script src="js/charts.js"></script>
+<script src="js/map.js"></script>
+<script src="js/orientation.js"></script>
+<script src="js/video.js"></script>
+<script src="js/error-codes.js"></script>
+<script src="js/mission.js"></script>
+<script src="js/data-manager.js"></script>
+<script src="js/controls.js"></script>
+</body>
+</html>
